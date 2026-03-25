@@ -38,61 +38,70 @@ st.markdown("""
 # --- OSINT FUNCTIONS (SERPER) TURBO ---
 def buscar_google_serper(dominio, api_key):
     url = "https://google.serper.dev/search"
-    # We add "site:rocketreach.co" to force pre-digested results if they exist
-    query = f'"{dominio}" "email format" OR site:rocketreach.co "{dominio}" OR "*@{dominio}"'
-    payload = json.dumps({"q": query, "num": 20})
+    # Simplified search query to prevent Google "OR" operator bugs returning 0 results
+    query = f'"{dominio}" email format'
+    payload = json.dumps({"q": query, "num": 10})
     headers = {'X-API-KEY': api_key, 'Content-Type': 'application/json'}
     try:
         response = requests.request("POST", url, headers=headers, data=payload, timeout=10)
+        if response.status_code == 403: return {"error": "API Key Invalid or Out of Credits"}
+        if response.status_code == 429: return {"error": "Rate Limit Exceeded"}
         return response.json()
-    except: return {}
+    except Exception as e: return {"error": f"Connection Error: {str(e)}"}
 
 def descobrir_regra_da_empresa(dominio, api_key):
     dados = buscar_google_serper(dominio, api_key)
-    texto_google = ""
     
-    if 'organic' in dados:
-        for item in dados['organic']:
-            # Pull title and snippet, convert to lowercase
-            texto_google += str(item.get('title', '')).lower() + " " + str(item.get('snippet', '')).lower() + " "
+    if "error" in dados:
+        return "first.last", f"Medium ({dados['error']})"
+        
+    if 'organic' not in dados or len(dados['organic']) == 0:
+        return "first.last", "Medium (No Google Results)"
+        
+    texto_google = ""
+    for item in dados['organic']:
+        texto_google += str(item.get('title', '')).lower() + " " + str(item.get('snippet', '')).lower() + " "
             
-    # 1. ADVANCED HACK: Read exactly what RocketReach, Hunter, and Apollo output in Snippets
-    if "first.last@" in texto_google or "first_name.last_name" in texto_google or "{first}.{last}" in texto_google or "[first].[last]" in texto_google: 
+    # 1. ADVANCED HACK: Bruteforce Regex for RocketReach, Hunter, Apollo string formats
+    t = texto_google
+    
+    if re.search(r'first\s*\.\s*last|first_name\s*\.\s*last_name|\[first\]\.\[last\]|\{first\}\.\{last\}|first\.last@', t):
         return "first.last", "High (Public DB: first.last)"
     
-    if "flast@" in texto_google or "firstlast@" in texto_google or "first_initiallast_name" in texto_google or "{f}{last}" in texto_google: 
-        return "flast", "High (Public DB: flast)"
-        
-    if "f.last@" in texto_google or "first_initial.last_name" in texto_google or "{f}.{last}" in texto_google or "[f].[last]" in texto_google: 
+    if re.search(r'f\s*\.\s*last|first_initial\s*\.\s*last_name|\[f\]\.\[last\]|\{f\}\.\{last\}|f\.last@', t):
         return "f.last", "High (Public DB: f.last)"
         
-    if "first_last@" in texto_google or "first_name_last_name" in texto_google or "{first}_{last}" in texto_google: 
+    if re.search(r'first\s*_\s*last|first_name\s*_\s*last_name|\[first\]_\[last\]|\{first\}_{last\}|first_last@', t):
         return "first_last", "High (Public DB: first_last)"
         
-    if "first-last@" in texto_google or "first_name-last_name" in texto_google or "{first}-{last}" in texto_google: 
+    if re.search(r'first\s*-\s*last|first_name\s*-\s*last_name|\[first\]-\[last\]|\{first\}-\{last\}|first-last@', t):
         return "first-last", "High (Public DB: first-last)"
         
-    if "firstl@" in texto_google or "first_namelast_initial" in texto_google or "{first}{l}" in texto_google: 
+    if re.search(r'f\s*last|first_initial\s*last_name|\[f\]\[last\]|\{f\}\{last\}|flast@', t):
+        return "flast", "High (Public DB: flast)"
+        
+    if re.search(r'first\s*last|first_name\s*last_name|\[first\]\[last\]|\{first\}\{last\}|firstlast@', t):
+        return "firstlast", "High (Public DB: firstlast)"
+        
+    if re.search(r'first\s*l\b|first_name\s*last_initial|\[first\]\[l\]|\{first\}\{l\}|firstl@', t):
         return "firstl", "High (Public DB: firstl)"
         
-    if "first@" in texto_google or "first name only" in texto_google or "first_name@" in texto_google: 
+    if "first name only" in t or re.search(r'\[first\]@|\{first\}@|first@', t):
         return "first", "High (Public DB: first)"
 
     # 2. IF NO EXPLICIT FORMULA, CATCH LEAKED EMAILS AND COUNT THEM
     padrao = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-    emails = re.findall(padrao, texto_google)
+    emails = re.findall(padrao, t)
     emails_empresa = [e for e in emails if dominio in e]
     
     padroes_encontrados = []
     for email in emails_empresa:
         prefixo = email.split('@')[0]
-        # Ignore department emails
         if prefixo in ['info', 'contact', 'support', 'sales', 'hr', 'admin', 'hello', 'press', 'media', 'marketing', 'team', 'jobs', 'careers']:
             continue
             
         if "." in prefixo:
-            partes = prefixo.split(".")
-            if len(partes[0]) == 1: padroes_encontrados.append("f.last")
+            if len(prefixo.split(".")[0]) == 1: padroes_encontrados.append("f.last")
             else: padroes_encontrados.append("first.last")
         elif "_" in prefixo: padroes_encontrados.append("first_last")
         elif "-" in prefixo: padroes_encontrados.append("first-last")
@@ -104,8 +113,8 @@ def descobrir_regra_da_empresa(dominio, api_key):
         regra_vencedora = Counter(padroes_encontrados).most_common(1)[0][0]
         return regra_vencedora, f"High (OSINT Sampling: {regra_vencedora})"
     
-    # 3. IF EVERYTHING FAILS, MARK AS MEDIUM.
-    return "first.last", "Medium (Global Estimate)"
+    # 3. IF EVERYTHING FAILS, SHOW EXACTLY WHY IT FAILED
+    return "first.last", "Medium (Pattern Not Found)"
 
 def aplicar_regra(f_name_raw, l_name_raw, dominio, regra):
     f_parts = str(f_name_raw).split()
@@ -121,9 +130,11 @@ def aplicar_regra(f_name_raw, l_name_raw, dominio, regra):
     if regra == "f.last": return f"{f[0]}.{l}@{dominio}"
     if regra == "first_last": return f"{f}_{l}@{dominio}"
     if regra == "first-last": return f"{f}-{l}@{dominio}"
-    if regra == "firstlast" or regra == "flast": return f"{f}{l}@{dominio}"
+    if regra == "firstlast": return f"{f}{l}@{dominio}"
+    if regra == "flast": return f"{f[0]}{l}@{dominio}" if f else f"{l}@{dominio}"
     if regra == "firstl": return f"{f}{l[0]}@{dominio}" if l else f"{f}@{dominio}"
     if regra == "first": return f"{f}@{dominio}"
+    
     return f"{f}.{l}@{dominio}"
 
 # --- LOGIN ---
@@ -211,24 +222,43 @@ else:
         log_h = '<div class="log-box">' + "".join([f'<div class="log-entry"><span class="log-time">[{l["created_at"][11:19]}]</span> {l["message"]}</div>' for l in logs]) + '</div>'
         st.markdown(log_h, unsafe_allow_html=True)
         
+        # --- AQUI ESTÁ A LÓGICA CORRIGIDA DOS BOTÕES ---
         c_m, c_r = st.columns(2)
+        
         with c_m:
             st.subheader("⛏️ Step 1: Mining")
-            if job['status'] != 'done':
-                if not job['is_paused'] and job['phase'] == 'zi':
-                    if st.button("⏸️ PAUSE MINER", use_container_width=True): 
-                        supabase.table("zi_jobs").update({"is_paused": True}).eq("id", job['id']).execute(); st.rerun()
+            if job['phase'] == 'zi':
+                if job['status'] == 'done':
+                    st.success("✅ Mining Complete")
+                elif job['is_paused']:
+                    if st.button("▶️ RESUME MINER", use_container_width=True): 
+                        supabase.table("zi_jobs").update({"phase": "zi", "is_paused": False, "status": "pending", "updated_at": datetime.now().isoformat()}).eq("id", job['id']).execute()
+                        st.rerun()
                 else:
-                    if st.button("▶️ START MINER", use_container_width=True): 
-                        supabase.table("zi_jobs").update({"phase": "zi", "is_paused": False, "status": "pending", "updated_at": datetime.now().isoformat()}).eq("id", job['id']).execute(); st.rerun()
+                    if st.button("⏸️ PAUSE MINER", use_container_width=True): 
+                        supabase.table("zi_jobs").update({"is_paused": True}).eq("id", job['id']).execute()
+                        st.rerun()
+            else:
+                st.info("🔒 Locked (Enrichment Active)")
+
         with c_r:
             st.subheader("💎 Step 2: Enrichment")
-            if job['status'] != 'done':
-                if not job['is_paused'] and job['phase'] == 'serper':
-                    if st.button("⏸️ PAUSE REFINERY", use_container_width=True): 
-                        supabase.table("zi_jobs").update({"is_paused": True}).eq("id", job['id']).execute(); st.rerun()
+            if job['phase'] == 'serper':
+                if job['status'] == 'done':
+                    st.success("✨ Enrichment Completed")
+                elif job['is_paused']:
+                    if st.button("▶️ RESUME REFINERY", use_container_width=True): 
+                        supabase.table("zi_jobs").update({"is_paused": False, "status": "processing"}).eq("id", job['id']).execute()
+                        st.rerun()
                 else:
-                    if st.button("✨ FIND EMAILS (SERPER)", type="primary", disabled=job['total_leads']==0, use_container_width=True): 
+                    st.info("⏳ Enrichment running...")
+                    if st.button("⏸️ PAUSE REFINERY", use_container_width=True): 
+                        supabase.table("zi_jobs").update({"is_paused": True}).eq("id", job['id']).execute()
+                        st.rerun()
+            else:
+                # Se a fase ainda for ZI, permite iniciar o Serper caso o ZI esteja concluído ou pausado
+                if job['status'] == 'done' or job['is_paused']:
+                    if st.button("✨ START ENRICHMENT (SERPER)", type="primary", disabled=job['total_leads']==0, use_container_width=True): 
                         
                         supabase.table("zi_jobs").update({"phase": "serper", "status": "processing", "updated_at": datetime.now().isoformat()}).eq("id", job['id']).execute()
                         supabase.table("zi_logs").insert({"job_id": job['id'], "message": "Starting OSINT Turbo Enrichment (Serper)..."}).execute()
@@ -254,7 +284,7 @@ else:
                             )
                             dominios_unicos = df[df['dominio_limpo'] != 'nan']['dominio_limpo'].unique()
                             
-                            supabase.table("zi_logs").insert({"job_id": job['id'], "message": f"📊 {len(dominios_unicos)} unique companies identified."}).execute()
+                            supabase.table("zi_logs").insert({"job_id": job['id'], "message": f"📊 {len(dominios_unicos)} unique domains identified. Searching Google..."}).execute()
                             
                             regras_empresas = {}
                             confianca_empresas = {}
@@ -266,7 +296,7 @@ else:
                                     regras_empresas[dominio] = regra
                                     confianca_empresas[dominio] = confianca
                                     
-                                    time.sleep(0.05) 
+                                    time.sleep(0.15) 
                                 p_bar.progress((i + 1) / len(dominios_unicos))
                                 
                             progress_text.text("⚡ Building exact emails...")
@@ -290,7 +320,7 @@ else:
                                 email_original = row.get('email', '')
                                 if "Medium" in confianca and email_original and "XXXXX" not in email_original:
                                     row['email'] = email_original
-                                    row['guessed_email'] = "Medium (Leveraged from ZoomInfo)"
+                                    row['guessed_email'] = f"{confianca} (Kept ZI Email)"
                                 else:
                                     row['email'] = email_gerado
                                     row['guessed_email'] = confianca
@@ -311,6 +341,8 @@ else:
                         except Exception as e:
                             st.error(f"Critical processing error: {e}")
                             supabase.table("zi_jobs").update({"status": "error", "is_paused": True}).eq("id", job['id']).execute()
+                else:
+                    st.warning("⏸️ Pause or finish the Miner first to unlock Enrichment.")
 
         st.markdown("---")
 
