@@ -38,7 +38,6 @@ st.markdown("""
 # --- OSINT FUNCTIONS (SERPER) TURBO ---
 def buscar_google_serper(dominio, api_key):
     url = "https://google.serper.dev/search"
-    # Simplified search query to prevent Google "OR" operator bugs returning 0 results
     query = f'"{dominio}" email format'
     payload = json.dumps({"q": query, "num": 10})
     headers = {'X-API-KEY': api_key, 'Content-Type': 'application/json'}
@@ -62,7 +61,6 @@ def descobrir_regra_da_empresa(dominio, api_key):
     for item in dados['organic']:
         texto_google += str(item.get('title', '')).lower() + " " + str(item.get('snippet', '')).lower() + " "
             
-    # 1. ADVANCED HACK: Bruteforce Regex for RocketReach, Hunter, Apollo string formats
     t = texto_google
     
     if re.search(r'first\s*\.\s*last|first_name\s*\.\s*last_name|\[first\]\.\[last\]|\{first\}\.\{last\}|first\.last@', t):
@@ -89,7 +87,6 @@ def descobrir_regra_da_empresa(dominio, api_key):
     if "first name only" in t or re.search(r'\[first\]@|\{first\}@|first@', t):
         return "first", "High (Public DB: first)"
 
-    # 2. IF NO EXPLICIT FORMULA, CATCH LEAKED EMAILS AND COUNT THEM
     padrao = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
     emails = re.findall(padrao, t)
     emails_empresa = [e for e in emails if dominio in e]
@@ -113,7 +110,6 @@ def descobrir_regra_da_empresa(dominio, api_key):
         regra_vencedora = Counter(padroes_encontrados).most_common(1)[0][0]
         return regra_vencedora, f"High (OSINT Sampling: {regra_vencedora})"
     
-    # 3. IF EVERYTHING FAILS, SHOW EXACTLY WHY IT FAILED
     return "first.last", "Medium (Pattern Not Found)"
 
 def aplicar_regra(f_name_raw, l_name_raw, dominio, regra):
@@ -222,7 +218,7 @@ else:
         log_h = '<div class="log-box">' + "".join([f'<div class="log-entry"><span class="log-time">[{l["created_at"][11:19]}]</span> {l["message"]}</div>' for l in logs]) + '</div>'
         st.markdown(log_h, unsafe_allow_html=True)
         
-        # --- AQUI ESTÁ A LÓGICA CORRIGIDA DOS BOTÕES ---
+        # --- AQUI ESTÁ A LÓGICA CORRIGIDA DOS BOTÕES E DO LOOP ---
         c_m, c_r = st.columns(2)
         
         with c_m:
@@ -255,92 +251,95 @@ else:
                     if st.button("⏸️ PAUSE REFINERY", use_container_width=True): 
                         supabase.table("zi_jobs").update({"is_paused": True}).eq("id", job['id']).execute()
                         st.rerun()
+
+                    # O LOOP DE ENRIQUECIMENTO FOI MOVIDO PARA CÁ! Ele agora roda automaticamente se o estado for 'processing'
+                    progress_text = st.empty()
+                    p_bar = st.progress(0)
+                    
+                    try:
+                        progress_text.text("⏳ Collecting total data from the database...")
+                        all_leads, offset = [], 0
+                        while True:
+                            res_leads = supabase.table("zi_leads").select("*").eq("job_id", job['id']).range(offset, offset + 999).execute()
+                            if not res_leads.data: break
+                            all_leads.extend(res_leads.data)
+                            if len(res_leads.data) < 1000: break
+                            offset += 1000
+                            
+                        df = pd.DataFrame(all_leads)
+                        
+                        progress_text.text("🧹 Analyzing companies...")
+                        df['dominio_limpo'] = df['website'].astype(str).apply(
+                            lambda x: urlparse(x if x.startswith('http') else 'http://'+x).netloc.replace('www.', '').lower()
+                        )
+                        dominios_unicos = df[df['dominio_limpo'] != 'nan']['dominio_limpo'].unique()
+                        
+                        supabase.table("zi_logs").insert({"job_id": job['id'], "message": f"📊 {len(dominios_unicos)} unique domains identified. Searching Google..."}).execute()
+                        
+                        regras_empresas = {}
+                        confianca_empresas = {}
+                        
+                        for i, dominio in enumerate(dominios_unicos):
+                            progress_text.text(f"🔍 Investigating company {i+1}/{len(dominios_unicos)}: {dominio}")
+                            if len(dominio) > 3 and dominio != 'none' and dominio != 'nan':
+                                regra, confianca = descobrir_regra_da_empresa(dominio, SERPER_API_KEY)
+                                regras_empresas[dominio] = regra
+                                confianca_empresas[dominio] = confianca
+                                
+                                time.sleep(0.15) 
+                            p_bar.progress((i + 1) / len(dominios_unicos))
+                            
+                        progress_text.text("⚡ Building exact emails...")
+                        
+                        for row in all_leads:
+                            site_raw = str(row.get('website', ''))
+                            dominio = urlparse(site_raw if site_raw.startswith('http') else 'http://'+site_raw).netloc.replace('www.', '').lower()
+                            
+                            nome = str(row.get('name', ''))
+                            sobrenome = str(row.get('last_name', ''))
+                            
+                            regra = regras_empresas.get(dominio, "first.last")
+                            confianca = confianca_empresas.get(dominio, "Medium (Global Estimate)")
+                            
+                            if dominio and nome and nome.lower() not in ['nan', 'none', '']:
+                                email_gerado = aplicar_regra(nome, sobrenome, dominio, regra)
+                            else:
+                                email_gerado = ""
+                                confianca = "Error: No Name or Website"
+                            
+                            email_original = row.get('email', '')
+                            if "Medium" in confianca and email_original and "XXXXX" not in email_original:
+                                row['email'] = email_original
+                                row['guessed_email'] = f"{confianca} (Kept ZI Email)"
+                            else:
+                                row['email'] = email_gerado
+                                row['guessed_email'] = confianca
+                            
+                        progress_text.text("💾 Saving securely to the database...")
+                        supabase.table("zi_logs").insert({"job_id": job['id'], "message": "💾 Updating leads in the database..."}).execute()
+                        
+                        for i in range(0, len(all_leads), 1000):
+                            supabase.table("zi_leads").upsert(all_leads[i:i+1000]).execute()
+                            
+                        supabase.table("zi_logs").insert({"job_id": job['id'], "message": "🏁 OSINT Enrichment 100% Completed!"}).execute()
+                        supabase.table("zi_jobs").update({"status": "done", "updated_at": datetime.now().isoformat()}).eq("id", job['id']).execute()
+                        
+                        st.success("✨ High Confidence emails generated successfully!")
+                        time.sleep(2)
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Critical processing error: {e}")
+                        supabase.table("zi_jobs").update({"status": "error", "is_paused": True}).eq("id", job['id']).execute()
+
             else:
                 # Se a fase ainda for ZI, permite iniciar o Serper caso o ZI esteja concluído ou pausado
                 if job['status'] == 'done' or job['is_paused']:
                     if st.button("✨ START ENRICHMENT (SERPER)", type="primary", disabled=job['total_leads']==0, use_container_width=True): 
-                        
+                        # O Botão apenas LIGA a chave do motor e reinicia o ecrã!
                         supabase.table("zi_jobs").update({"phase": "serper", "status": "processing", "updated_at": datetime.now().isoformat()}).eq("id", job['id']).execute()
                         supabase.table("zi_logs").insert({"job_id": job['id'], "message": "Starting OSINT Turbo Enrichment (Serper)..."}).execute()
-                        
-                        progress_text = st.empty()
-                        p_bar = st.progress(0)
-                        
-                        try:
-                            progress_text.text("⏳ Collecting total data from the database...")
-                            all_leads, offset = [], 0
-                            while True:
-                                res_leads = supabase.table("zi_leads").select("*").eq("job_id", job['id']).range(offset, offset + 999).execute()
-                                if not res_leads.data: break
-                                all_leads.extend(res_leads.data)
-                                if len(res_leads.data) < 1000: break
-                                offset += 1000
-                                
-                            df = pd.DataFrame(all_leads)
-                            
-                            progress_text.text("🧹 Analyzing companies...")
-                            df['dominio_limpo'] = df['website'].astype(str).apply(
-                                lambda x: urlparse(x if x.startswith('http') else 'http://'+x).netloc.replace('www.', '').lower()
-                            )
-                            dominios_unicos = df[df['dominio_limpo'] != 'nan']['dominio_limpo'].unique()
-                            
-                            supabase.table("zi_logs").insert({"job_id": job['id'], "message": f"📊 {len(dominios_unicos)} unique domains identified. Searching Google..."}).execute()
-                            
-                            regras_empresas = {}
-                            confianca_empresas = {}
-                            
-                            for i, dominio in enumerate(dominios_unicos):
-                                progress_text.text(f"🔍 Investigating company {i+1}/{len(dominios_unicos)}: {dominio}")
-                                if len(dominio) > 3 and dominio != 'none' and dominio != 'nan':
-                                    regra, confianca = descobrir_regra_da_empresa(dominio, SERPER_API_KEY)
-                                    regras_empresas[dominio] = regra
-                                    confianca_empresas[dominio] = confianca
-                                    
-                                    time.sleep(0.15) 
-                                p_bar.progress((i + 1) / len(dominios_unicos))
-                                
-                            progress_text.text("⚡ Building exact emails...")
-                            
-                            for row in all_leads:
-                                site_raw = str(row.get('website', ''))
-                                dominio = urlparse(site_raw if site_raw.startswith('http') else 'http://'+site_raw).netloc.replace('www.', '').lower()
-                                
-                                nome = str(row.get('name', ''))
-                                sobrenome = str(row.get('last_name', ''))
-                                
-                                regra = regras_empresas.get(dominio, "first.last")
-                                confianca = confianca_empresas.get(dominio, "Medium (Global Estimate)")
-                                
-                                if dominio and nome and nome.lower() not in ['nan', 'none', '']:
-                                    email_gerado = aplicar_regra(nome, sobrenome, dominio, regra)
-                                else:
-                                    email_gerado = ""
-                                    confianca = "Error: No Name or Website"
-                                
-                                email_original = row.get('email', '')
-                                if "Medium" in confianca and email_original and "XXXXX" not in email_original:
-                                    row['email'] = email_original
-                                    row['guessed_email'] = f"{confianca} (Kept ZI Email)"
-                                else:
-                                    row['email'] = email_gerado
-                                    row['guessed_email'] = confianca
-                                
-                            progress_text.text("💾 Saving securely to the database...")
-                            supabase.table("zi_logs").insert({"job_id": job['id'], "message": "💾 Updating leads in the database..."}).execute()
-                            
-                            for i in range(0, len(all_leads), 1000):
-                                supabase.table("zi_leads").upsert(all_leads[i:i+1000]).execute()
-                                
-                            supabase.table("zi_logs").insert({"job_id": job['id'], "message": "🏁 OSINT Enrichment 100% Completed!"}).execute()
-                            supabase.table("zi_jobs").update({"status": "done", "updated_at": datetime.now().isoformat()}).eq("id", job['id']).execute()
-                            
-                            st.success("✨ High Confidence emails generated successfully!")
-                            time.sleep(2)
-                            st.rerun()
-                            
-                        except Exception as e:
-                            st.error(f"Critical processing error: {e}")
-                            supabase.table("zi_jobs").update({"status": "error", "is_paused": True}).eq("id", job['id']).execute()
+                        st.rerun()
                 else:
                     st.warning("⏸️ Pause or finish the Miner first to unlock Enrichment.")
 
