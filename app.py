@@ -238,6 +238,50 @@ else:
 
         with c_r:
             st.subheader("💎 Step 2: Enrichment")
+
+            # --- BOTÃO DE EMERGÊNCIA: gera emails sem Serper ---
+            with st.expander("⚡ Geração Rápida (sem Serper)", expanded=False):
+                st.caption("Gera emails com padrão first.last para todos os leads sem email. Não consulta API externa.")
+                if st.button("🚀 GERAR EMAILS AGORA", use_container_width=True):
+                    with st.spinner("Gerando emails..."):
+                        all_leads, offset = [], 0
+                        while True:
+                            res_leads = supabase.table("zi_leads").select("*").eq("job_id", job['id']).range(offset, offset + 999).execute()
+                            if not res_leads.data: break
+                            all_leads.extend(res_leads.data)
+                            offset += 1000
+
+                        atualizados = 0
+                        for row in all_leads:
+                            email_original = str(row.get('email', '') or '')
+                            guessed_zi     = str(row.get('guessed_email', '') or '')
+                            tem_email      = email_original and "XXXX" not in email_original and "@" in email_original
+                            tem_guessed    = guessed_zi and "XXXX" not in guessed_zi and "@" in guessed_zi
+
+                            if tem_email:
+                                row['guessed_email'] = "Direct from ZI"
+                            elif tem_guessed:
+                                row['email'] = guessed_zi
+                                row['guessed_email'] = "High (ZI Predicted)"
+                                atualizados += 1
+                            else:
+                                site_raw = str(row.get('website', ''))
+                                dominio = urlparse(site_raw if site_raw.startswith('http') else 'http://'+site_raw).netloc.replace('www.', '').lower()
+                                if dominio and dominio != 'nan':
+                                    primeiro = resolver_nome_campo(row, ['first_name', 'firstName', 'name', 'primeiro_nome'])
+                                    ultimo   = resolver_nome_campo(row, ['last_name', 'lastName', 'surname', 'ultimo_nome'])
+                                    email_gerado = aplicar_regra(primeiro, ultimo, dominio, "first.last")
+                                    if email_gerado:
+                                        row['email'] = email_gerado
+                                        row['guessed_email'] = "Medium (first.last default)"
+                                        atualizados += 1
+
+                        for i in range(0, len(all_leads), 1000):
+                            supabase.table("zi_leads").upsert(all_leads[i:i+1000]).execute()
+
+                        st.success(f"✅ {atualizados} emails gerados!")
+                        st.rerun()
+
             if job['phase'] == 'serper':
                 if job['status'] == 'done': st.success("✨ Completed")
                 elif job['is_paused']:
