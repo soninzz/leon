@@ -354,8 +354,15 @@ else:
                                     row['email'] = aplicar_regra(primeiro, ultimo, dominio, regra)
                                     row['guessed_email'] = confianca
 
-                            # Salva imediatamente no banco
-                            supabase.table("zi_leads").upsert(batch).execute()
+                            # Deduplica por id antes de salvar (evita conflito de upsert)
+                            seen_ids = set()
+                            batch_unico = []
+                            for r in batch:
+                                rid = r.get('id')
+                                if rid not in seen_ids:
+                                    seen_ids.add(rid)
+                                    batch_unico.append(r)
+                            supabase.table("zi_leads").upsert(batch_unico).execute()
                             time.sleep(0.1)
 
                         supabase.table("zi_jobs").update({"status": "done"}).eq("id", job['id']).execute()
