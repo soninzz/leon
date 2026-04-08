@@ -306,12 +306,15 @@ else:
                                 confianca = "Error: No Name or Website"
                             
                             email_original = row.get('email', '')
-                            if "Medium" in confianca and email_original and "XXXXX" not in email_original:
-                                row['email'] = email_original
-                                row['guessed_email'] = f"{confianca} (Kept ZI Email)"
-                            else:
+                            
+                            # --- NOVA LÓGICA DE DECISÃO INTEGRADA ---
+                            if not email_original or "XXXXX" in email_original or "*" in email_original:
                                 row['email'] = email_gerado
                                 row['guessed_email'] = confianca
+                            else:
+                                # Caso o ZoomInfo entregue um email real, priorizamos ele
+                                row['email'] = email_original
+                                row['guessed_email'] = "Direct from ZI"
                             
                         progress_text.text("💾 Saving securely to the database...")
                         supabase.table("zi_logs").insert({"job_id": job['id'], "message": "💾 Updating leads in the database..."}).execute()
