@@ -207,7 +207,7 @@ else:
         
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Total Leads", job['total_leads'])
-        m2.metric("Status", "🏁 CLOSED" if job['status']=='done' else ("⏸️ IDLE" if job['is_paused'] else ("🚀 RUNNING" if job['status']=='processing' else "⏳ QUEUED")))
+        m2.metric("Status", "🏁 CLOSED" if job['status']=='done' else ("⏸️" if job['is_paused'] else ("🚀 RUNNING" if job['status']=='processing' else "⏳ QUEUED")))
         m3.metric("Mode", "MINING (Step 1)" if job['phase']=='zi' else "ENRICHING (Step 2)")
         m4.metric("Last Update", job['updated_at'][11:19])
 
@@ -218,7 +218,6 @@ else:
         log_h = '<div class="log-box">' + "".join([f'<div class="log-entry"><span class="log-time">[{l["created_at"][11:19]}]</span> {l["message"]}</div>' for l in logs]) + '</div>'
         st.markdown(log_h, unsafe_allow_html=True)
         
-        # --- AQUI ESTÁ A LÓGICA CORRIGIDA DOS BOTÕES E DO LOOP ---
         c_m, c_r = st.columns(2)
         
         with c_m:
@@ -252,7 +251,6 @@ else:
                         supabase.table("zi_jobs").update({"is_paused": True}).eq("id", job['id']).execute()
                         st.rerun()
 
-                    # O LOOP DE ENRIQUECIMENTO FOI MOVIDO PARA CÁ! Ele agora roda automaticamente se o estado for 'processing'
                     progress_text = st.empty()
                     p_bar = st.progress(0)
                     
@@ -333,10 +331,8 @@ else:
                         supabase.table("zi_jobs").update({"status": "error", "is_paused": True}).eq("id", job['id']).execute()
 
             else:
-                # Se a fase ainda for ZI, permite iniciar o Serper caso o ZI esteja concluído ou pausado
                 if job['status'] == 'done' or job['is_paused']:
                     if st.button("✨ START ENRICHMENT (SERPER)", type="primary", disabled=job['total_leads']==0, use_container_width=True): 
-                        # O Botão apenas LIGA a chave do motor e reinicia o ecrã!
                         supabase.table("zi_jobs").update({"phase": "serper", "status": "processing", "updated_at": datetime.now().isoformat()}).eq("id", job['id']).execute()
                         supabase.table("zi_logs").insert({"job_id": job['id'], "message": "Starting OSINT Turbo Enrichment (Serper)..."}).execute()
                         st.rerun()
@@ -345,30 +341,74 @@ else:
 
         st.markdown("---")
 
-        # --- DOWNLOAD AREA ---
+        # --- SMART EXPORT (ADICIONADO O NOVO CÓDIGO AQUI) ---
         with st.container(border=True):
-            st.subheader("📤 Smart Export")
-            st.info(f"The database detected {job['total_leads']} leads. Use the button below to extract them all.")
+            st.subheader("📤 Finalização e Exportação")
+            st.info(f"O banco de dados detectou {job['total_leads']} leads. Utilize os botões abaixo para gerir o arquivo final.")
             
-            if st.button(f"🚀 EXTRACT ALL {job['total_leads']} LEADS NOW", type="primary", use_container_width=True):
-                with st.spinner("Connecting to Supabase and generating file..."):
-                    try:
-                        all_leads, offset = [], 0
-                        while True:
-                            res_leads = supabase.table("zi_leads").select("*").eq("job_id", job['id']).range(offset, offset + 999).execute()
-                            if not res_leads.data: break
-                            all_leads.extend(res_leads.data)
-                            if len(res_leads.data) < 1000: break
-                            offset += 1000
-                        
-                        if all_leads:
-                            df_export = pd.DataFrame(all_leads)
-                            if 'guessed_email' in df_export.columns:
-                                df_export.rename(columns={'guessed_email': 'Confidence Level'}, inplace=True)
+            col_down1, col_down2 = st.columns(2)
+            
+            with col_down1:
+                if st.button("🔄 GERAR ARQUIVO FINAL (Sincronizar)", use_container_width=True):
+                    with st.spinner("Sincronizando banco de dados com o CSV..."):
+                        try:
+                            # 1. Busca os leads atualizados do Supabase (todas as páginas)
+                            all_leads, offset = [], 0
+                            while True:
+                                res_leads = supabase.table("zi_leads").select("*").eq("job_id", job['id']).range(offset, offset + 999).execute()
+                                if not res_leads.data: break
+                                all_leads.extend(res_leads.data)
+                                if len(res_leads.data) < 1000: break
+                                offset += 1000
+
+                            if all_leads:
+                                df_final = pd.DataFrame(all_leads)
                                 
-                            st.download_button("✅ DOWNLOAD READY! SAVE CSV", df_export.to_csv(index=False).encode('utf-8'), f"growbigventures_{job['id']}.csv", use_container_width=True)
-                        else: st.error("No data in the 'zi_leads' table for this mission.")
-                    except Exception as e: st.error(f"Extraction error: {e}")
+                                # 2. Gera o CSV em memória
+                                csv_buffer = df_final.to_csv(index=False).encode('utf-8')
+                                
+                                # 3. Faz o upload para o Storage sobrescrevendo o arquivo antigo
+                                file_name = f"leads_{job['id']}.csv"
+                                supabase.storage.from('leads_exports').upload(
+                                    path=file_name,
+                                    file=csv_buffer,
+                                    file_options={"upsert": "true"}
+                                )
+                                
+                                # 4. Atualiza a URL no registro do Job caso não exista
+                                # Nota: Aqui assumimos que a estrutura da sua URL segue o padrão do Supabase
+                                public_url = f"{SUPABASE_URL}/storage/v1/object/public/leads_exports/{file_name}"
+                                supabase.table("zi_jobs").update({"file_url": public_url}).eq("id", job['id']).execute()
+                                
+                                st.success("✅ Arquivo atualizado com sucesso!")
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("Nenhum lead encontrado para este Job.")
+                        except Exception as e:
+                            st.error(f"Erro na sincronização: {e}")
+
+            with col_down2:
+                # Exibe o link de download que já existe no seu banco ou o botão de extração direta
+                if job.get('file_url'):
+                    st.link_button("📥 BAIXAR CSV ATUALIZADO", job['file_url'], use_container_width=True)
+                else:
+                    # Fallback caso o arquivo ainda não tenha sido gerado via Storage
+                    if st.button(f"🚀 EXTRAÇÃO DIRETA ({job['total_leads']} LEADS)", type="primary", use_container_width=True):
+                        with st.spinner("Gerando extração direta..."):
+                            try:
+                                all_leads, offset = [], 0
+                                while True:
+                                    res_leads = supabase.table("zi_leads").select("*").eq("job_id", job['id']).range(offset, offset + 999).execute()
+                                    if not res_leads.data: break
+                                    all_leads.extend(res_leads.data)
+                                    if len(res_leads.data) < 1000: break
+                                    offset += 1000
+                                
+                                if all_leads:
+                                    df_export = pd.DataFrame(all_leads)
+                                    st.download_button("✅ CLIQUE PARA SALVAR", df_export.to_csv(index=False).encode('utf-8'), f"growbig_{job['id']}.csv", use_container_width=True)
+                            except Exception as e: st.error(f"Erro: {e}")
 
         st.markdown("### 📊 Preview (Last 25 Leads)")
         headers = ['Name', 'Last Name', 'Job Title', 'Company', 'Email', 'Source', 'Phone', 'City', 'State', 'Location']
