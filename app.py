@@ -341,7 +341,7 @@ else:
 
         st.markdown("---")
 
-        # --- SMART EXPORT (ADICIONADO O NOVO CÓDIGO AQUI) ---
+        # --- SMART EXPORT ---
         with st.container(border=True):
             st.subheader("📤 Finalização e Exportação")
             st.info(f"O banco de dados detectou {job['total_leads']} leads. Utilize os botões abaixo para gerir o arquivo final.")
@@ -352,7 +352,7 @@ else:
                 if st.button("🔄 GERAR ARQUIVO FINAL (Sincronizar)", use_container_width=True):
                     with st.spinner("Sincronizando banco de dados com o CSV..."):
                         try:
-                            # 1. Busca os leads atualizados do Supabase (todas as páginas)
+                            # 1. Busca os leads atualizados do Supabase
                             all_leads, offset = [], 0
                             while True:
                                 res_leads = supabase.table("zi_leads").select("*").eq("job_id", job['id']).range(offset, offset + 999).execute()
@@ -363,60 +363,30 @@ else:
 
                             if all_leads:
                                 df_final = pd.DataFrame(all_leads)
-                                
-                                # 2. Gera o CSV em memória
                                 csv_buffer = df_final.to_csv(index=False).encode('utf-8')
                                 
-                                # 3. Faz o upload para o Storage sobrescrevendo o arquivo antigo
-                                file_name = f"leads_{job['id']}.csv"
-                                supabase.storage.from('leads_exports').upload(
-                                    path=file_name,
+                                # 2. Faz o upload para o Storage
+                                file_path = f"leads_{job['id']}.csv"
+                                supabase.storage.from_('leads_exports').upload(
+                                    path=file_path,
                                     file=csv_buffer,
                                     file_options={"upsert": "true"}
                                 )
                                 
-                                # 4. Atualiza a URL no registro do Job caso não exista
-                                # Nota: Aqui assumimos que a estrutura da sua URL segue o padrão do Supabase
-                                public_url = f"{SUPABASE_URL}/storage/v1/object/public/leads_exports/{file_name}"
+                                # 3. Gera a URL pública e salva no job
+                                public_url = f"{SUPABASE_URL}/storage/v1/object/public/leads_exports/{file_path}"
                                 supabase.table("zi_jobs").update({"file_url": public_url}).eq("id", job['id']).execute()
                                 
-                                st.success("✅ Arquivo atualizado com sucesso!")
+                                st.success("✅ Arquivo atualizado!")
                                 time.sleep(1)
                                 st.rerun()
                             else:
-                                st.error("Nenhum lead encontrado para este Job.")
+                                st.error("Nenhum lead encontrado.")
                         except Exception as e:
-                            st.error(f"Erro na sincronização: {e}")
+                            st.error(f"Erro: {str(e)}")
 
             with col_down2:
-                # Exibe o link de download que já existe no seu banco ou o botão de extração direta
                 if job.get('file_url'):
                     st.link_button("📥 BAIXAR CSV ATUALIZADO", job['file_url'], use_container_width=True)
                 else:
-                    # Fallback caso o arquivo ainda não tenha sido gerado via Storage
-                    if st.button(f"🚀 EXTRAÇÃO DIRETA ({job['total_leads']} LEADS)", type="primary", use_container_width=True):
-                        with st.spinner("Gerando extração direta..."):
-                            try:
-                                all_leads, offset = [], 0
-                                while True:
-                                    res_leads = supabase.table("zi_leads").select("*").eq("job_id", job['id']).range(offset, offset + 999).execute()
-                                    if not res_leads.data: break
-                                    all_leads.extend(res_leads.data)
-                                    if len(res_leads.data) < 1000: break
-                                    offset += 1000
-                                
-                                if all_leads:
-                                    df_export = pd.DataFrame(all_leads)
-                                    st.download_button("✅ CLIQUE PARA SALVAR", df_export.to_csv(index=False).encode('utf-8'), f"growbig_{job['id']}.csv", use_container_width=True)
-                            except Exception as e: st.error(f"Erro: {e}")
-
-        st.markdown("### 📊 Preview (Last 25 Leads)")
-        headers = ['Name', 'Last Name', 'Job Title', 'Company', 'Email', 'Source', 'Phone', 'City', 'State', 'Location']
-        preview_data = job.get('last_leads_preview') or []
-        df_preview = pd.DataFrame(preview_data)
-        if not df_preview.empty:
-            df_preview.columns = headers[:len(df_preview.columns)]
-            st.dataframe(df_preview, use_container_width=True, hide_index=True)
-
-        if not job['is_paused'] and job['status'] != 'done': 
-            time.sleep(4); st.rerun()
+                    st.warning("Gere o arquivo primeiro ➔")
