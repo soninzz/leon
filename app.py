@@ -13,10 +13,9 @@ from collections import Counter
 
 # --- CONFIG ---
 st.set_page_config(page_title="GrowBigVentures Lead Gen Engine", layout="wide", page_icon="⚡")
-# Removido caractere invisível da KEY e URL
 SUPABASE_URL = "https://sukeimkqwoboizyweaqt.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN1a2VpbWtxd29ib2l6eXdlYXF0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDMyMDMyMiwiZXhwIjoyMDg1ODk2MzIyfQ.Ji3RaWVV5mCl1pXhKrG6OxEcEoJAV5AD3sg6wyxu_G8"
-SERPER_API_KEY = "13166215d9db87e3e90f42dfdff70e00acb05902" 
+SERPER_API_KEY = "13166215d9db87e3e90f42dfdff70e00acb05902"
 
 @st.cache_resource
 def init_connection():
@@ -39,7 +38,8 @@ st.markdown("""
 # --- OSINT FUNCTIONS ---
 def buscar_google_serper(dominio, api_key):
     url = "https://google.serper.dev/search"
-    query = f'"{dominio}" email format'
+    # FIX 2: Query melhorada para encontrar padrões de email reais
+    query = f'site:hunter.io {dominio} OR "{dominio}" email pattern'
     payload = json.dumps({"q": query, "num": 10})
     headers = {'X-API-KEY': api_key, 'Content-Type': 'application/json'}
     try:
@@ -49,47 +49,89 @@ def buscar_google_serper(dominio, api_key):
 
 def descobrir_regra_da_empresa(dominio, api_key):
     dados = buscar_google_serper(dominio, api_key)
-    if "error" in dados or 'organic' not in dados: return "first.last", "Medium (Default)"
-    
+    if "error" in dados or 'organic' not in dados:
+        return "first.last", "Medium (Default)"
+
     t = ""
     for item in dados['organic']:
         t += str(item.get('title', '')).lower() + " " + str(item.get('snippet', '')).lower() + " "
-    
-    # Regex de captura de padrão
+
+    # FIX 3: Primeiro tenta extrair emails reais e deduzir o padrão a partir deles
+    emails_reais = re.findall(r'[\w.+%-]+@' + re.escape(dominio), t)
+    if emails_reais:
+        regra_deduzida = deduzir_regra_dos_emails(emails_reais)
+        if regra_deduzida:
+            return regra_deduzida, f"High (OSINT: real email found)"
+
+    # Fallback: regex de padrão textual
     patterns = {
         "first.last": r'first\s*\.\s*last|first\.last@',
-        "f.last": r'f\s*\.\s*last|f\.last@',
+        "f.last":     r'\bf\s*\.\s*last\b|f\.last@',
         "first_last": r'first\s*_\s*last|first_last@',
         "first-last": r'first\s*-\s*last|first-last@',
-        "flast": r'f\s*last|flast@',
-        "firstlast": r'first\s*last|firstlast@',
-        "firstl": r'first\s*l\b|firstl@',
-        "first": r'\[first\]@|first@'
+        "flast":      r'\bflast\b|flast@',
+        "firstlast":  r'\bfirstlast\b|firstlast@',
+        "firstl":     r'\bfirstl\b|firstl@',
+        "first":      r'\[first\]@|\bfirst@'
     }
-    
     for p_name, p_regex in patterns.items():
-        if re.search(p_regex, t): return p_name, f"High (OSINT: {p_name})"
+        if re.search(p_regex, t):
+            return p_name, f"High (OSINT: {p_name})"
 
     return "first.last", "Medium (Pattern Not Found)"
+
+def deduzir_regra_dos_emails(emails):
+    """
+    Dado uma lista de emails reais encontrados, tenta deduzir o padrão usado.
+    Ex: john.doe@empresa.com → first.last
+    """
+    contagem = Counter()
+    for email in emails:
+        local = email.split("@")[0]
+        if re.match(r'^[a-z]+\.[a-z]+$', local):
+            contagem["first.last"] += 1
+        elif re.match(r'^[a-z]\.[a-z]+$', local):
+            contagem["f.last"] += 1
+        elif re.match(r'^[a-z]+_[a-z]+$', local):
+            contagem["first_last"] += 1
+        elif re.match(r'^[a-z]+-[a-z]+$', local):
+            contagem["first-last"] += 1
+        elif re.match(r'^[a-z][a-z]+$', local) and len(local) > 4:
+            contagem["firstlast"] += 1
+        elif re.match(r'^[a-z][a-z]{2,}$', local):
+            contagem["flast"] += 1
+        elif re.match(r'^[a-z]+$', local):
+            contagem["first"] += 1
+    if contagem:
+        return contagem.most_common(1)[0][0]
+    return None
+
+def resolver_nome_campo(row, possiveis_campos):
+    """FIX 1: Resolve o nome do campo com fallback para múltiplos nomes possíveis."""
+    for campo in possiveis_campos:
+        val = row.get(campo)
+        if val and str(val).strip().lower() not in ('', 'nan', 'none'):
+            return str(val).strip()
+    return ""
 
 def aplicar_regra(f_name_raw, l_name_raw, dominio, regra):
     f_parts = str(f_name_raw).split()
     l_parts = str(l_name_raw).split() if str(l_name_raw).strip() and str(l_name_raw).lower() != 'nan' else []
-    
+
     f = unidecode(f_parts[0].lower().replace("-", "")) if f_parts else ""
     l = unidecode(l_parts[-1].lower().replace("-", "")) if l_parts else ""
-    
+
     if not f: return ""
-    
+
     rules = {
-        "first.last": f"{f}.{l}@{dominio}",
-        "f.last": f"{f[0]}.{l}@{dominio}" if l else f"{f}@{dominio}",
-        "first_last": f"{f}_{l}@{dominio}",
-        "first-last": f"{f}-{l}@{dominio}",
-        "firstlast": f"{f}{l}@{dominio}",
-        "flast": f"{f[0]}{l}@{dominio}" if l else f"{f}@{dominio}",
-        "firstl": f"{f}{l[0]}@{dominio}" if l else f"{f}@{dominio}",
-        "first": f"{f}@{dominio}"
+        "first.last": f"{f}.{l}@{dominio}" if l else f"{f}@{dominio}",
+        "f.last":     f"{f[0]}.{l}@{dominio}" if l else f"{f}@{dominio}",
+        "first_last": f"{f}_{l}@{dominio}" if l else f"{f}@{dominio}",
+        "first-last": f"{f}-{l}@{dominio}" if l else f"{f}@{dominio}",
+        "firstlast":  f"{f}{l}@{dominio}" if l else f"{f}@{dominio}",
+        "flast":      f"{f[0]}{l}@{dominio}" if l else f"{f}@{dominio}",
+        "firstl":     f"{f}{l[0]}@{dominio}" if l else f"{f}@{dominio}",
+        "first":      f"{f}@{dominio}"
     }
     return rules.get(regra, f"{f}.{l}@{dominio}")
 
@@ -119,20 +161,20 @@ with st.sidebar:
         st.toast("🚫 All systems halted.")
         time.sleep(1); st.rerun()
     st.divider()
-    try: 
+    try:
         res = supabase.table("zi_jobs").select("id, mission_name, created_at, status, total_leads, is_paused").order("created_at", desc=True).limit(40).execute()
         jobs = res.data or []
     except: jobs = []
-    
+
     options = [("➕ Launch New Mission", "NEW")]
     for j in jobs:
         icon = "🏁" if j['status'] == 'done' else ("⏸️" if j['is_paused'] else ("🟢" if j['status']=='processing' else "⏳"))
         options.append((f"{icon} {j.get('mission_name') or 'Job '+j['created_at'][5:16]} ({j['total_leads']})", j['id']))
-    
+
     current_ids = [opt[1] for opt in options]
     idx = current_ids.index(st.session_state["active_mission_id"]) if st.session_state["active_mission_id"] in current_ids else 0
     sel = st.selectbox("History:", options=options, format_func=lambda x: x[0], index=idx)
-    if sel[1] != st.session_state["active_mission_id"]: 
+    if sel[1] != st.session_state["active_mission_id"]:
         st.session_state["active_mission_id"] = sel[1]
         st.rerun()
 
@@ -146,7 +188,7 @@ if st.session_state["active_mission_id"] == "NEW":
             if url:
                 supabase.table("zi_jobs").update({"is_paused": True}).eq("status", "processing").execute()
                 res = supabase.table("zi_jobs").insert({"status": "pending", "phase": "zi", "filters": {"url": url, "limit": 300000}, "total_leads": 0, "is_paused": False, "mission_name": name, "updated_at": datetime.now().isoformat()}).execute()
-                if res.data: 
+                if res.data:
                     st.session_state["active_mission_id"] = res.data[0]['id']
                     st.rerun()
             else: st.warning("URL required.")
@@ -155,16 +197,16 @@ else:
     job = r.data
     if job:
         c1, c2 = st.columns([5, 1])
-        with c1: 
+        with c1:
             n = st.text_input("Mission Name", value=job.get('mission_name') or "", label_visibility="collapsed")
-            if n != job.get('mission_name'): 
+            if n != job.get('mission_name'):
                 supabase.table("zi_jobs").update({"mission_name": n}).eq("id", job['id']).execute()
                 st.rerun()
-        with c2: 
-            if job['status']!='done' and st.button("🏁 ARCHIVE"): 
+        with c2:
+            if job['status']!='done' and st.button("🏁 ARCHIVE"):
                 supabase.table("zi_jobs").update({"status": "done", "is_paused": True}).eq("id", job['id']).execute()
                 st.rerun()
-        
+
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Total Leads", job['total_leads'])
         m2.metric("Status", "🏁 CLOSED" if job['status']=='done' else ("⏸️" if job['is_paused'] else ("🚀 RUNNING" if job['status']=='processing' else "⏳ QUEUED")))
@@ -172,24 +214,24 @@ else:
         m4.metric("Last Update", job['updated_at'][11:19])
 
         st.markdown("### 🖥️ Terminal")
-        try: 
+        try:
             logs = supabase.table("zi_logs").select("created_at, message").eq("job_id", job['id']).order("created_at", desc=True).limit(50).execute().data or []
         except: logs = []
         log_h = '<div class="log-box">' + "".join([f'<div class="log-entry"><span class="log-time">[{l["created_at"][11:19]}]</span> {l["message"]}</div>' for l in logs]) + '</div>'
         st.markdown(log_h, unsafe_allow_html=True)
-        
+
         c_m, c_r = st.columns(2)
-        
+
         with c_m:
             st.subheader("⛏️ Step 1: Mining")
             if job['phase'] == 'zi':
                 if job['status'] == 'done': st.success("✅ Mining Complete")
                 elif job['is_paused']:
-                    if st.button("▶️ RESUME MINER", use_container_width=True): 
+                    if st.button("▶️ RESUME MINER", use_container_width=True):
                         supabase.table("zi_jobs").update({"phase": "zi", "is_paused": False, "status": "pending", "updated_at": datetime.now().isoformat()}).eq("id", job['id']).execute()
                         st.rerun()
                 else:
-                    if st.button("⏸️ PAUSE MINER", use_container_width=True): 
+                    if st.button("⏸️ PAUSE MINER", use_container_width=True):
                         supabase.table("zi_jobs").update({"is_paused": True}).eq("id", job['id']).execute()
                         st.rerun()
             else: st.info("🔒 Locked")
@@ -199,18 +241,25 @@ else:
             if job['phase'] == 'serper':
                 if job['status'] == 'done': st.success("✨ Completed")
                 elif job['is_paused']:
-                    if st.button("▶️ RESUME REFINERY", use_container_width=True): 
+                    if st.button("▶️ RESUME REFINERY", use_container_width=True):
                         supabase.table("zi_jobs").update({"is_paused": False, "status": "processing"}).eq("id", job['id']).execute()
                         st.rerun()
                 else:
                     st.info("⏳ Enrichment running...")
-                    if st.button("⏸️ PAUSE REFINERY", use_container_width=True): 
+                    if st.button("⏸️ PAUSE REFINERY", use_container_width=True):
                         supabase.table("zi_jobs").update({"is_paused": True}).eq("id", job['id']).execute()
                         st.rerun()
 
                     progress_text = st.empty()
                     p_bar = st.progress(0)
-                    
+
+                    # FIX 1: Debug — mostra colunas reais na primeira execução
+                    with st.expander("🔍 Debug: colunas da tabela", expanded=False):
+                        sample = supabase.table("zi_leads").select("*").eq("job_id", job['id']).limit(1).execute()
+                        if sample.data:
+                            st.write("Colunas detectadas:", list(sample.data[0].keys()))
+                            st.write("Exemplo:", sample.data[0])
+
                     try:
                         progress_text.text("⏳ Collecting total data...")
                         all_leads, offset = [], 0
@@ -219,14 +268,14 @@ else:
                             if not res_leads.data: break
                             all_leads.extend(res_leads.data)
                             offset += 1000
-                            
+
                         df = pd.DataFrame(all_leads)
                         df['dominio_limpo'] = df['website'].astype(str).apply(lambda x: urlparse(x if x.startswith('http') else 'http://'+x).netloc.replace('www.', '').lower())
                         dominios_unicos = df[df['dominio_limpo'] != 'nan']['dominio_limpo'].unique()
-                        
+
                         regras_empresas = {}
                         confianca_empresas = {}
-                        
+
                         for i, dominio in enumerate(dominios_unicos):
                             progress_text.text(f"🔍 Investigating: {dominio}")
                             regra, confianca = descobrir_regra_da_empresa(dominio, SERPER_API_KEY)
@@ -234,29 +283,32 @@ else:
                             confianca_empresas[dominio] = confianca
                             p_bar.progress((i + 1) / len(dominios_unicos))
                             time.sleep(0.1)
-                            
+
                         for row in all_leads:
                             site_raw = str(row.get('website', ''))
                             dominio = urlparse(site_raw if site_raw.startswith('http') else 'http://'+site_raw).netloc.replace('www.', '').lower()
                             regra = regras_empresas.get(dominio, "first.last")
                             confianca = confianca_empresas.get(dominio, "Medium")
-                            
+
                             email_original = row.get('email', '')
-                            if not email_original or "XXXX" in email_original:
-                                row['email'] = aplicar_regra(row.get('name'), row.get('last_name'), dominio, regra)
+                            if not email_original or "XXXX" in str(email_original):
+                                # FIX 1: Tenta múltiplos nomes possíveis para first/last name
+                                primeiro = resolver_nome_campo(row, ['first_name', 'firstName', 'name', 'primeiro_nome'])
+                                ultimo   = resolver_nome_campo(row, ['last_name', 'lastName', 'surname', 'ultimo_nome'])
+                                row['email'] = aplicar_regra(primeiro, ultimo, dominio, regra)
                                 row['guessed_email'] = confianca
                             else:
                                 row['guessed_email'] = "Direct from ZI"
-                            
+
                         for i in range(0, len(all_leads), 1000):
                             supabase.table("zi_leads").upsert(all_leads[i:i+1000]).execute()
-                            
+
                         supabase.table("zi_jobs").update({"status": "done"}).eq("id", job['id']).execute()
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")
             else:
-                if st.button("✨ START ENRICHMENT", type="primary", use_container_width=True): 
+                if st.button("✨ START ENRICHMENT", type="primary", use_container_width=True):
                     supabase.table("zi_jobs").update({"phase": "serper", "status": "processing"}).eq("id", job['id']).execute()
                     st.rerun()
 
