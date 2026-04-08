@@ -37,9 +37,9 @@ st.markdown("""
 
 # --- OSINT FUNCTIONS ---
 def buscar_emails_reais_serper(dominio, api_key):
-    """Busca emails reais do domínio no Google via Serper."""
+    """Search for real emails from the domain on Google via Serper."""
     url = "https://google.serper.dev/search"
-    # Busca direta por emails reais do domínio nos resultados do Google
+    # Direct search for real emails from the domain in Google results
     query = f'"@{dominio}"'
     payload = json.dumps({"q": query, "num": 10})
     headers = {'X-API-KEY': api_key, 'Content-Type': 'application/json'}
@@ -53,18 +53,18 @@ def descobrir_regra_da_empresa(dominio, api_key):
     if "error" in dados or 'organic' not in dados:
         return "first.last", "Medium (Default)"
 
-    # Concatena todos os títulos e snippets
+    # Concatenate all titles and snippets
     t = ""
     for item in dados['organic']:
         t += str(item.get('title', '')).lower() + " "
         t += str(item.get('snippet', '')).lower() + " "
-        # Inclui também o link que às vezes contém email
+        # Also include link which sometimes contains email
         t += str(item.get('link', '')).lower() + " "
 
-    # Extrai emails reais do domínio que aparecem nos resultados
+    # Extract real emails from domain found in results
     emails_reais = re.findall(r'[a-z0-9.+%-]{1,30}@' + re.escape(dominio), t)
 
-    # Filtra emails genéricos (info@, contact@, support@, etc)
+    # Filter out generic emails (info@, contact@, support@, etc)
     ignorar = {'info', 'contact', 'support', 'hello', 'admin', 'help',
                'sales', 'team', 'mail', 'office', 'noreply', 'no-reply',
                'press', 'media', 'legal', 'privacy', 'billing', 'hr'}
@@ -79,8 +79,8 @@ def descobrir_regra_da_empresa(dominio, api_key):
 
 def deduzir_regra_dos_emails(emails):
     """
-    Dado uma lista de emails reais encontrados, tenta deduzir o padrão usado.
-    Ex: john.doe@empresa.com → first.last
+    Given a list of real emails found, deduce the pattern used.
+    Ex: john.doe@company.com → first.last
     """
     contagem = Counter()
     for email in emails:
@@ -104,7 +104,7 @@ def deduzir_regra_dos_emails(emails):
     return None
 
 def resolver_nome_campo(row, possiveis_campos):
-    """FIX 1: Resolve o nome do campo com fallback para múltiplos nomes possíveis."""
+    """Resolve field name with fallback for multiple possible names."""
     for campo in possiveis_campos:
         val = row.get(campo)
         if val and str(val).strip().lower() not in ('', 'nan', 'none'):
@@ -237,9 +237,9 @@ else:
             st.subheader("💎 Step 2: Enrichment")
 
             # --- BOTÃO DE EMERGÊNCIA: gera emails sem Serper ---
-            with st.expander("⚡ Geração Rápida (sem Serper)", expanded=False):
-                st.caption("Gera emails com padrão first.last para todos os leads sem email. Não consulta API externa.")
-                if st.button("🚀 GERAR EMAILS AGORA", use_container_width=True):
+            with st.expander("⚡ Quick Generate (no Serper)", expanded=False):
+                st.caption("Generates emails using first.last pattern for all leads without email. No external API call.")
+                if st.button("🚀 GENERATE EMAILS NOW", use_container_width=True):
                     with st.spinner("Gerando emails..."):
                         all_leads, offset = [], 0
                         while True:
@@ -276,7 +276,7 @@ else:
                         for i in range(0, len(all_leads), 1000):
                             supabase.table("zi_leads").upsert(all_leads[i:i+1000]).execute()
 
-                        st.success(f"✅ {atualizados} emails gerados!")
+                        st.success(f"✅ {atualizados} emails generated!")
                         st.rerun()
 
             if job['phase'] == 'serper':
@@ -294,12 +294,12 @@ else:
                     progress_text = st.empty()
                     p_bar = st.progress(0)
 
-                    # FIX 1: Debug — mostra colunas reais na primeira execução
-                    with st.expander("🔍 Debug: colunas da tabela", expanded=False):
+                    # Debug — show real table columns
+                    with st.expander("🔍 Debug: table columns", expanded=False):
                         sample = supabase.table("zi_leads").select("*").eq("job_id", job['id']).limit(1).execute()
                         if sample.data:
-                            st.write("Colunas detectadas:", list(sample.data[0].keys()))
-                            st.write("Exemplo:", sample.data[0])
+                            st.write("Detected columns:", list(sample.data[0].keys()))
+                            st.write("Example:", sample.data[0])
 
                     try:
                         progress_text.text("⏳ Collecting total data...")
@@ -310,7 +310,7 @@ else:
                             all_leads.extend(res_leads.data)
                             offset += 1000
 
-                        # Agrupa leads por domínio
+                        # Group leads by domain
                         from collections import defaultdict
                         leads_por_dominio = defaultdict(list)
                         for row in all_leads:
@@ -322,17 +322,17 @@ else:
                         total = len(dominios_unicos)
 
                         for i, dominio in enumerate(dominios_unicos):
-                            # Checa se foi pausado a cada domínio
+                            # Check if paused on each domain
                             check = supabase.table("zi_jobs").select("is_paused").eq("id", job['id']).single().execute()
                             if check.data and check.data.get("is_paused"):
-                                progress_text.text("⏸️ Pausado. Progresso salvo.")
+                                progress_text.text("⏸️ Paused. Progress saved.")
                                 break
 
                             progress_text.text(f"🔍 ({i+1}/{total}) Investigating: {dominio}")
                             regra, confianca = descobrir_regra_da_empresa(dominio, SERPER_API_KEY)
                             p_bar.progress((i + 1) / total)
 
-                            # Aplica e salva imediatamente os leads desse domínio
+                            # Apply and save leads for this domain immediately
                             batch = leads_por_dominio[dominio]
                             for row in batch:
                                 email_original = str(row.get('email', '') or '')
@@ -351,7 +351,7 @@ else:
                                     row['email'] = aplicar_regra(primeiro, ultimo, dominio, regra)
                                     row['guessed_email'] = confianca
 
-                            # Deduplica por id antes de salvar (evita conflito de upsert)
+                            # Deduplicate by id before saving (avoids upsert conflict)
                             seen_ids = set()
                             batch_unico = []
                             for r in batch:
@@ -374,12 +374,12 @@ else:
         st.markdown("---")
         # --- SMART EXPORT ---
         with st.container(border=True):
-            st.subheader("📤 Finalização e Exportação")
-            st.info(f"Leads detectados: {job['total_leads']}")
+            st.subheader("📤 Export")
+            st.info(f"Leads detected: {job['total_leads']}")
             col_down1, col_down2 = st.columns(2)
             with col_down1:
-                if st.button("🔄 GERAR ARQUIVO FINAL", use_container_width=True):
-                    with st.spinner("Sincronizando..."):
+                if st.button("🔄 GENERATE & DOWNLOAD CSV", type="primary", use_container_width=True):
+                    with st.spinner("Preparing file..."):
                         all_leads, offset = [], 0
                         while True:
                             res_leads = supabase.table("zi_leads").select("*").eq("job_id", job['id']).range(offset, offset + 999).execute()
@@ -387,12 +387,29 @@ else:
                             all_leads.extend(res_leads.data)
                             offset += 1000
                         if all_leads:
-                            csv_buffer = pd.DataFrame(all_leads).to_csv(index=False).encode('utf-8')
-                            file_path = f"leads_{job['id']}.csv"
-                            supabase.storage.from_('leads_exports').upload(path=file_path, file=csv_buffer, file_options={"upsert": "true"})
-                            public_url = f"{SUPABASE_URL}/storage/v1/object/public/leads_exports/{file_path}"
-                            supabase.table("zi_jobs").update({"file_url": public_url}).eq("id", job['id']).execute()
-                            st.rerun()
+                            df_export = pd.DataFrame(all_leads)
+                            # Deduplicate by email, keeping most recent
+                            df_export = df_export[df_export['email'].notna() & (df_export['email'] != '')]
+                            df_export = df_export.sort_values('created_at', ascending=False)
+                            df_export = df_export.drop_duplicates(subset=['email'], keep='first')
+                            df_export = df_export.reset_index(drop=True)
+                            csv_buffer = df_export.to_csv(index=False).encode('utf-8')
+                            mission_name = (job.get('mission_name') or job['id'])[:30].replace(' ', '_')
+                            st.session_state['csv_ready'] = csv_buffer
+                            st.session_state['csv_filename'] = f"leads_{mission_name}.csv"
+                            st.session_state['csv_count'] = len(df_export)
+                        else:
+                            st.warning("No leads found.")
+
             with col_down2:
-                if job.get('file_url'): st.link_button("📥 BAIXAR CSV ATUALIZADO", job['file_url'], use_container_width=True)
-                else: st.warning("Gere o arquivo primeiro")
+                if 'csv_ready' in st.session_state:
+                    st.download_button(
+                        label=f"📥 DOWNLOAD {st.session_state.get('csv_count', '')} LEADS",
+                        data=st.session_state['csv_ready'],
+                        file_name=st.session_state.get('csv_filename', 'leads.csv'),
+                        mime='text/csv',
+                        use_container_width=True,
+                        type="primary"
+                    )
+                else:
+                    st.warning("Generate the file first")
