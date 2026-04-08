@@ -36,10 +36,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- OSINT FUNCTIONS ---
-def buscar_google_serper(dominio, api_key):
+def buscar_emails_reais_serper(dominio, api_key):
+    """Busca emails reais do domínio no Google via Serper."""
     url = "https://google.serper.dev/search"
-    # FIX 2: Query melhorada para encontrar padrões de email reais
-    query = f'site:hunter.io {dominio} OR "{dominio}" email pattern'
+    # Busca direta por emails reais do domínio nos resultados do Google
+    query = f'"@{dominio}"'
     payload = json.dumps({"q": query, "num": 10})
     headers = {'X-API-KEY': api_key, 'Content-Type': 'application/json'}
     try:
@@ -48,35 +49,31 @@ def buscar_google_serper(dominio, api_key):
     except: return {"error": "Connection Error"}
 
 def descobrir_regra_da_empresa(dominio, api_key):
-    dados = buscar_google_serper(dominio, api_key)
+    dados = buscar_emails_reais_serper(dominio, api_key)
     if "error" in dados or 'organic' not in dados:
         return "first.last", "Medium (Default)"
 
+    # Concatena todos os títulos e snippets
     t = ""
     for item in dados['organic']:
-        t += str(item.get('title', '')).lower() + " " + str(item.get('snippet', '')).lower() + " "
+        t += str(item.get('title', '')).lower() + " "
+        t += str(item.get('snippet', '')).lower() + " "
+        # Inclui também o link que às vezes contém email
+        t += str(item.get('link', '')).lower() + " "
 
-    # FIX 3: Primeiro tenta extrair emails reais e deduzir o padrão a partir deles
-    emails_reais = re.findall(r'[\w.+%-]+@' + re.escape(dominio), t)
-    if emails_reais:
-        regra_deduzida = deduzir_regra_dos_emails(emails_reais)
+    # Extrai emails reais do domínio que aparecem nos resultados
+    emails_reais = re.findall(r'[a-z0-9.+%-]{1,30}@' + re.escape(dominio), t)
+
+    # Filtra emails genéricos (info@, contact@, support@, etc)
+    ignorar = {'info', 'contact', 'support', 'hello', 'admin', 'help',
+               'sales', 'team', 'mail', 'office', 'noreply', 'no-reply',
+               'press', 'media', 'legal', 'privacy', 'billing', 'hr'}
+    emails_pessoais = [e for e in emails_reais if e.split('@')[0] not in ignorar]
+
+    if emails_pessoais:
+        regra_deduzida = deduzir_regra_dos_emails(emails_pessoais)
         if regra_deduzida:
-            return regra_deduzida, f"High (OSINT: real email found)"
-
-    # Fallback: regex de padrão textual
-    patterns = {
-        "first.last": r'first\s*\.\s*last|first\.last@',
-        "f.last":     r'\bf\s*\.\s*last\b|f\.last@',
-        "first_last": r'first\s*_\s*last|first_last@',
-        "first-last": r'first\s*-\s*last|first-last@',
-        "flast":      r'\bflast\b|flast@',
-        "firstlast":  r'\bfirstlast\b|firstlast@',
-        "firstl":     r'\bfirstl\b|firstl@',
-        "first":      r'\[first\]@|\bfirst@'
-    }
-    for p_name, p_regex in patterns.items():
-        if re.search(p_regex, t):
-            return p_name, f"High (OSINT: {p_name})"
+            return regra_deduzida, f"High (real email found)"
 
     return "first.last", "Medium (Pattern Not Found)"
 
