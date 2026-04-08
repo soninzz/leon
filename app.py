@@ -313,39 +313,50 @@ else:
                             all_leads.extend(res_leads.data)
                             offset += 1000
 
-                        df = pd.DataFrame(all_leads)
-                        df['dominio_limpo'] = df['website'].astype(str).apply(lambda x: urlparse(x if x.startswith('http') else 'http://'+x).netloc.replace('www.', '').lower())
-                        dominios_unicos = df[df['dominio_limpo'] != 'nan']['dominio_limpo'].unique()
-
-                        regras_empresas = {}
-                        confianca_empresas = {}
-
-                        for i, dominio in enumerate(dominios_unicos):
-                            progress_text.text(f"🔍 Investigating: {dominio}")
-                            regra, confianca = descobrir_regra_da_empresa(dominio, SERPER_API_KEY)
-                            regras_empresas[dominio] = regra
-                            confianca_empresas[dominio] = confianca
-                            p_bar.progress((i + 1) / len(dominios_unicos))
-                            time.sleep(0.1)
-
+                        # Agrupa leads por domínio
+                        from collections import defaultdict
+                        leads_por_dominio = defaultdict(list)
                         for row in all_leads:
                             site_raw = str(row.get('website', ''))
                             dominio = urlparse(site_raw if site_raw.startswith('http') else 'http://'+site_raw).netloc.replace('www.', '').lower()
-                            regra = regras_empresas.get(dominio, "first.last")
-                            confianca = confianca_empresas.get(dominio, "Medium")
+                            leads_por_dominio[dominio].append(row)
 
-                            email_original = row.get('email', '')
-                            if not email_original or "XXXX" in str(email_original):
-                                # FIX 1: Tenta múltiplos nomes possíveis para first/last name
-                                primeiro = resolver_nome_campo(row, ['first_name', 'firstName', 'name', 'primeiro_nome'])
-                                ultimo   = resolver_nome_campo(row, ['last_name', 'lastName', 'surname', 'ultimo_nome'])
-                                row['email'] = aplicar_regra(primeiro, ultimo, dominio, regra)
-                                row['guessed_email'] = confianca
-                            else:
-                                row['guessed_email'] = "Direct from ZI"
+                        dominios_unicos = [d for d in leads_por_dominio.keys() if d and d != 'nan']
+                        total = len(dominios_unicos)
 
-                        for i in range(0, len(all_leads), 1000):
-                            supabase.table("zi_leads").upsert(all_leads[i:i+1000]).execute()
+                        for i, dominio in enumerate(dominios_unicos):
+                            # Checa se foi pausado a cada domínio
+                            check = supabase.table("zi_jobs").select("is_paused").eq("id", job['id']).single().execute()
+                            if check.data and check.data.get("is_paused"):
+                                progress_text.text("⏸️ Pausado. Progresso salvo.")
+                                break
+
+                            progress_text.text(f"🔍 ({i+1}/{total}) Investigating: {dominio}")
+                            regra, confianca = descobrir_regra_da_empresa(dominio, SERPER_API_KEY)
+                            p_bar.progress((i + 1) / total)
+
+                            # Aplica e salva imediatamente os leads desse domínio
+                            batch = leads_por_dominio[dominio]
+                            for row in batch:
+                                email_original = str(row.get('email', '') or '')
+                                guessed_zi     = str(row.get('guessed_email', '') or '')
+                                tem_email   = email_original and "XXXX" not in email_original and "@" in email_original
+                                tem_guessed = guessed_zi and "XXXX" not in guessed_zi and "@" in guessed_zi
+
+                                if tem_email:
+                                    row['guessed_email'] = "Direct from ZI"
+                                elif tem_guessed:
+                                    row['email'] = guessed_zi
+                                    row['guessed_email'] = "High (ZI Predicted)"
+                                else:
+                                    primeiro = resolver_nome_campo(row, ['first_name', 'firstName', 'name', 'primeiro_nome'])
+                                    ultimo   = resolver_nome_campo(row, ['last_name', 'lastName', 'surname', 'ultimo_nome'])
+                                    row['email'] = aplicar_regra(primeiro, ultimo, dominio, regra)
+                                    row['guessed_email'] = confianca
+
+                            # Salva imediatamente no banco
+                            supabase.table("zi_leads").upsert(batch).execute()
+                            time.sleep(0.1)
 
                         supabase.table("zi_jobs").update({"status": "done"}).eq("id", job['id']).execute()
                         st.rerun()
