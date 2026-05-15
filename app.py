@@ -483,50 +483,86 @@ def aplicar_regra(f_name_raw, l_name_raw, dominio, regra):
 # ─────────────────────────────────────────────
 #  FUNÇÃO EXECUTORA (PROCESSO EM LOTES COM CACHE)
 # ─────────────────────────────────────────────
-def processar_enriquecimento_serper(job_id, api_key, supabase_client):
-    """
-    Roda o enriquecimento de emails mitigando o erro 57014 (Timeout)
-    Puxando os leads em fatias e cacheando domínios repetidos.
-    """
+def rodar_enriquecimento_seguro(job_id, api_key, supabase_client):
+    st.info("Iniciando o enriquecimento em lotes seguros...")
+    
+    # Criamos uma barra de progresso no Streamlit para você acompanhar
+    barra_progresso = st.progress(0)
+    status_texto = st.empty()
+    
+    limite_bloco = 50
     offset = 0
-    limit = 100
-    dominio_cache = {}  # Cache temporário para não repetir requisições da mesma empresa
+    total_processado = 0
+    
+    # Dicionário de cache na memória do Streamlit para evitar chamadas repetidas ao Serper
+    if 'dominio_cache' not in st.session_state:
+        st.session_state['dominio_cache'] = {}
 
     while True:
-        # Puxa fatias de 100 leads por vez para aliviar o banco
-        res = supabase_client.table('zi_leads').select('*').eq('job_id', job_id).range(offset, offset + limit).execute()
-        leads = res.data
+        status_texto.text(f"Buscando bloco de leads do banco (Registros: {offset} a {offset + limite_bloco})...")
         
-        if not leads:
-            break  # Fim dos leads
+        try:
+            # Puxa apenas uma fatia minúscula do banco (Evita o erro 57014 de Timeout)
+            res = supabase_client.table('zi_leads') \
+                .select('id', 'name', 'last_name', 'website', 'email') \
+                .eq('job_id', job_id) \
+                .range(offset, offset + limite_bloco - 1) \
+                .execute()
+                
+            leads_bloco = res.data
             
-        for lead in leads:
-            # Ignora se já tiver e-mail preenchido
-            if lead.get('email'):
-                continue
+            # Se não voltaram mais leads, significa que a lista acabou
+            if not leads_bloco or len(leads_bloco) == 0:
+                break
                 
-            dominio = lead.get('website')
-            if not dominio or dominio.lower() in ['nan', '']:
-                continue
+            status_texto.text(f"Processando regra de e-mails para {len(leads_bloco)} contatos...")
+            
+            for lead in leads_bloco:
+                # Se o lead já tem e-mail, pula para o próximo
+                if lead.get('email'):
+                    continue
+                    
+                dominio = lead.get('website')
+                if not dominio or dominio.lower() in ['nan', '', 'n/a']:
+                    continue
                 
-            # Se o domínio já foi analisado neste lote, pega do cache (Poupa 90% de tempo e API)
-            if dominio in dominio_cache:
-                regra, confidence = dominio_cache[dominio]
+                # Checa se já sabemos o padrão dessa empresa no cache da sessão
+                if dominio in st.session_state['dominio_cache']:
+                    regra, confidence = st.session_state['dominio_cache'][dominio]
+                else:
+                    # Só vai no Serper se for um domínio inédito neste clique
+                    regra, confidence = descobrir_regra_da_empresa(dominio, api_key)
+                    st.session_state['dominio_cache'][dominio] = (regra, confidence)
+                
+                # Monta o e-mail usando a função que você já tem
+                email_gerado = aplicar_regra(lead.get('name', ''), lead.get('last_name', ''), dominio, regra)
+                
+                if email_gerado:
+                    # Salva no banco imediatamente de forma leve
+                    supabase_client.table('zi_leads').update({
+                        "email": email_gerado,
+                        "confidence": confidence
+                    }).eq('id', lead['id']).execute()
+            
+            total_processado += len(leads_bloco)
+            offset += limite_bloco
+            
+            # Dá um pequeno respiro de 100ms para o Postgres respirar entre os blocos
+            time.sleep(0.1)
+            
+        except Exception as e:
+            # Se der erro de timeout mesmo no bloco, avisa e tenta o próximo bloco em vez de crashar a tela inteira
+            if "57014" in str(e):
+                st.warning(f"Timeout temporário detectado no bloco {offset}. Aguardando 3 segundos para retomar...")
+                time.sleep(3)
+                offset += limite_bloco # Avança para não travar em loop infinito
+                continue
             else:
-                regra, confidence = descobrir_regra_da_empresa(dominio, api_key)
-                dominio_cache[dominio] = (regra, confidence)
-                
-            # Constrói o e-mail baseado na regra definida
-            email_gerado = aplicar_regra(lead.get('name', ''), lead.get('last_name', ''), dominio, regra)
-            
-            if email_gerado:
-                # Atualiza linha por linha no banco de forma leve
-                supabase_client.table('zi_leads').update({
-                    "email": email_gerado,
-                    "confidence": confidence
-                }).eq('id', lead['id']).execute()
-                
-        offset += limit
+                st.error(f"Erro inesperado no pipeline: {str(e)}")
+                break
+
+    status_texto.success(f"🏁 Enriquecimento concluído! {total_processado} registros verificados.")
+    barra_progresso.progress(100)
 
 # ─────────────────────────────────────────────
 #  SESSION STATE INIT
