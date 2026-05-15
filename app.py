@@ -399,6 +399,8 @@ def status_badge(label, color, dot_color):
 #  OSINT FUNCTIONS (SERPER) — UNCHANGED LOGIC
 # ─────────────────────────────────────────────
 def buscar_google_serper(dominio, api_key):
+    if not dominio or dominio.lower() in ['nan', 'N/A', '']:
+        return {}
     url = "https://google.serper.dev/search"
     query = f'"{dominio}" "email format" OR site:rocketreach.co "{dominio}" OR "*@{dominio}"'
     payload = json.dumps({"q": query, "num": 20})
@@ -478,6 +480,53 @@ def aplicar_regra(f_name_raw, l_name_raw, dominio, regra):
     if regra == "first":        return f"{f}@{dominio}"
     return f"{f}.{l}@{dominio}"
 
+# ─────────────────────────────────────────────
+#  FUNÇÃO EXECUTORA (PROCESSO EM LOTES COM CACHE)
+# ─────────────────────────────────────────────
+def processar_enriquecimento_serper(job_id, api_key, supabase_client):
+    """
+    Roda o enriquecimento de emails mitigando o erro 57014 (Timeout)
+    Puxando os leads em fatias e cacheando domínios repetidos.
+    """
+    offset = 0
+    limit = 100
+    dominio_cache = {}  # Cache temporário para não repetir requisições da mesma empresa
+
+    while True:
+        # Puxa fatias de 100 leads por vez para aliviar o banco
+        res = supabase_client.table('zi_leads').select('*').eq('job_id', job_id).range(offset, offset + limit).execute()
+        leads = res.data
+        
+        if not leads:
+            break  # Fim dos leads
+            
+        for lead in leads:
+            # Ignora se já tiver e-mail preenchido
+            if lead.get('email'):
+                continue
+                
+            dominio = lead.get('website')
+            if not dominio or dominio.lower() in ['nan', '']:
+                continue
+                
+            # Se o domínio já foi analisado neste lote, pega do cache (Poupa 90% de tempo e API)
+            if dominio in dominio_cache:
+                regra, confidence = dominio_cache[dominio]
+            else:
+                regra, confidence = descobrir_regra_da_empresa(dominio, api_key)
+                dominio_cache[dominio] = (regra, confidence)
+                
+            # Constrói o e-mail baseado na regra definida
+            email_gerado = aplicar_regra(lead.get('name', ''), lead.get('last_name', ''), dominio, regra)
+            
+            if email_gerado:
+                # Atualiza linha por linha no banco de forma leve
+                supabase_client.table('zi_leads').update({
+                    "email": email_gerado,
+                    "confidence": confidence
+                }).eq('id', lead['id']).execute()
+                
+        offset += limit
 
 # ─────────────────────────────────────────────
 #  SESSION STATE INIT
