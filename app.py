@@ -499,25 +499,25 @@ def rodar_enriquecimento_seguro(job_id, api_key, supabase_client):
         st.session_state['dominio_cache'] = {}
 
     while True:
-        status_texto.text(f"Buscando bloco de leads do banco (Registros: {offset} a {offset + limite_bloco})...")
+        status_texto.text(f"Buscando bloco de leads...")
         
         try:
-            # Puxa apenas uma fatia minúscula do banco (Evita o erro 57014 de Timeout)
-          res = supabase_client.table('zi_leads') \
-               .select('id', 'name', 'last_name', 'website') \
-               .eq('job_id', job_id) \
-               .is_('email', 'null') \
-               .range(offset, offset + limite_bloco - 1) \
-               .execute()
-
-          leads_bloco = res.data
-               
+            # 1. A query do Supabase tem 4 espaços de recuo em relação ao 'try'
+            res = supabase_client.table('zi_leads') \
+                .select('id', 'name', 'last_name', 'website') \
+                .eq('job_id', job_id) \
+                .is_('email', 'null') \
+                .range(offset, offset + limite_bloco - 1) \
+                .execute()
+                
+            leads_bloco = res.data
             
-            # Se não voltaram mais leads, significa que a lista acabou
+            # 2. SEU ERRO ESTÁ AQUI: Essa linha tem que estar PERFEITAMENTE alinhada com o 'res' acima!
             if not leads_bloco or len(leads_bloco) == 0:
                 break
                 
-            status_texto.text(f"Processando regra de e-mails para {len(leads_bloco)} contatos...")
+            # Resto do código do loop...
+            status_texto.text(f"Processando...")
             
             for lead in leads_bloco:
                 # Se o lead já tem e-mail, pula para o próximo
