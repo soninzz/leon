@@ -509,7 +509,8 @@ def rodar_enriquecimento_seguro(job_id, api_key, supabase_client):
                .is_('email', 'null') \
                .range(offset, offset + limite_bloco - 1) \
                .execute()
-                
+
+          leads_bloco = res.data
                
             
             # Se não voltaram mais leads, significa que a lista acabou
