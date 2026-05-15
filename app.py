@@ -503,11 +503,12 @@ def rodar_enriquecimento_seguro(job_id, api_key, supabase_client):
         
         try:
             # Puxa apenas uma fatia minúscula do banco (Evita o erro 57014 de Timeout)
-            res = supabase_client.table('zi_leads') \
-                .select('id', 'name', 'last_name', 'website', 'email') \
-                .eq('job_id', job_id) \
-                .range(offset, offset + limite_bloco - 1) \
-                .execute()
+          res = supabase_client.table('zi_leads') \
+               .select('id', 'name', 'last_name', 'website') \
+               .eq('job_id', job_id) \
+               .is_('email', 'null') \
+               .range(offset, offset + limite_bloco - 1) \
+               .execute()
                 
             leads_bloco = res.data
             
