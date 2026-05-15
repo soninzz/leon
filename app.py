@@ -30,7 +30,7 @@ supabase = init_connection()
 # ─────────────────────────────────────────────
 #  GLOBAL CSS
 # ─────────────────────────────────────────────
-st.markdown("""
+st.markdown(
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 
@@ -266,7 +266,7 @@ h3 { font-size: 0.82rem !important; font-weight: 700 !important; color: #8B949E 
 }
 
 </style>
-""", unsafe_allow_html=True)
+, unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────
@@ -289,13 +289,13 @@ def render_terminal(logs):
             if emoji in msg:
                 color = c
                 break
-        entries_html += f"""
+        entries_html += f
         <div class="t-row">
             <span class="t-ts">{ts}</span>
             <span class="t-msg" style="color:{color}">{msg}</span>
-        </div>"""
+        </div>
 
-    st.markdown(f"""
+    st.markdown(f
     <style>
     .terminal-wrap {{
         background: #020408;
@@ -355,7 +355,7 @@ def render_terminal(logs):
         </div>
         <div class="terminal-body">{entries_html}</div>
     </div>
-    """, unsafe_allow_html=True)
+    , unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────
@@ -363,7 +363,7 @@ def render_terminal(logs):
 # ─────────────────────────────────────────────
 def section_header(icon, title, subtitle=""):
     sub_html = f'<p style="font-family:\'Syne\',sans-serif; font-size:0.77rem; color:#484F58; margin:0; margin-top:0.15rem;">{subtitle}</p>' if subtitle else ""
-    st.markdown(f"""
+    st.markdown(f
     <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.9rem;">
         <div style="width:36px; height:36px; background:#0D1117; border:1px solid #1C2333; border-radius:8px;
                     display:flex; align-items:center; justify-content:center; font-size:1rem; flex-shrink:0;">
@@ -382,7 +382,7 @@ def section_header(icon, title, subtitle=""):
 #  STATUS BADGE COMPONENT
 # ─────────────────────────────────────────────
 def status_badge(label, color, dot_color):
-    st.markdown(f"""
+    st.markdown(f
     <div style="display:inline-flex; align-items:center; gap:0.4rem;
                 background:{color}18; border:1px solid {color}40;
                 border-radius:99px; padding:0.25rem 0.75rem;
@@ -392,7 +392,7 @@ def status_badge(label, color, dot_color):
                      display:inline-block;"></span>
         {label}
     </div>
-    """, unsafe_allow_html=True)
+    , unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────
