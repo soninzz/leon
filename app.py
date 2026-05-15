@@ -30,7 +30,7 @@ supabase = init_connection()
 # ─────────────────────────────────────────────
 #  GLOBAL CSS
 # ─────────────────────────────────────────────
-st.markdown(
+st.html("""
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 
@@ -266,7 +266,7 @@ h3 { font-size: 0.82rem !important; font-weight: 700 !important; color: #8B949E 
 }
 
 </style>
-, unsafe_allow_html=True)
+""")
 
 
 # ─────────────────────────────────────────────
@@ -289,13 +289,13 @@ def render_terminal(logs):
             if emoji in msg:
                 color = c
                 break
-        entries_html += f
+        entries_html += f"""
         <div class="t-row">
             <span class="t-ts">{ts}</span>
             <span class="t-msg" style="color:{color}">{msg}</span>
-        </div>
+        </div>"""
 
-    st.markdown(f
+    st.html(f"""
     <style>
     .terminal-wrap {{
         background: #020408;
@@ -355,7 +355,7 @@ def render_terminal(logs):
         </div>
         <div class="terminal-body">{entries_html}</div>
     </div>
-    , unsafe_allow_html=True)
+    """)
 
 
 # ─────────────────────────────────────────────
@@ -363,7 +363,7 @@ def render_terminal(logs):
 # ─────────────────────────────────────────────
 def section_header(icon, title, subtitle=""):
     sub_html = f'<p style="font-family:\'Syne\',sans-serif; font-size:0.77rem; color:#484F58; margin:0; margin-top:0.15rem;">{subtitle}</p>' if subtitle else ""
-    st.markdown(f
+    st.html(f"""
     <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.9rem;">
         <div style="width:36px; height:36px; background:#0D1117; border:1px solid #1C2333; border-radius:8px;
                     display:flex; align-items:center; justify-content:center; font-size:1rem; flex-shrink:0;">
@@ -375,14 +375,14 @@ def section_header(icon, title, subtitle=""):
             {sub_html}
         </div>
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
 
 # ─────────────────────────────────────────────
 #  STATUS BADGE COMPONENT
 # ─────────────────────────────────────────────
 def status_badge(label, color, dot_color):
-    st.markdown(f
+    st.html(f"""
     <div style="display:inline-flex; align-items:center; gap:0.4rem;
                 background:{color}18; border:1px solid {color}40;
                 border-radius:99px; padding:0.25rem 0.75rem;
@@ -392,7 +392,7 @@ def status_badge(label, color, dot_color):
                      display:inline-block;"></span>
         {label}
     </div>
-    , unsafe_allow_html=True)
+    """)
 
 
 # ─────────────────────────────────────────────
@@ -492,7 +492,7 @@ if "active_mission_id" not in st.session_state:
 #  LOGIN SCREEN
 # ─────────────────────────────────────────────
 if not st.session_state.logged_in:
-    st.markdown("""
+    st.html("""
     <style>
     .login-outer {
         display: flex; flex-direction: column; align-items: center;
@@ -530,16 +530,16 @@ if not st.session_state.logged_in:
         <div class="login-logo">◈ Lead<span>Pulse</span></div>
         <div class="login-sub">Intelligence · Enrichment · Export</div>
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
     col_l, col_c, col_r = st.columns([1, 1.2, 1])
     with col_c:
         with st.container(border=True):
-            st.markdown("<p style='font-family:\"Syne\",sans-serif; font-size:0.72rem; font-weight:700; color:#484F58; letter-spacing:0.12em; text-transform:uppercase; margin-bottom:1rem;'>Access Required</p>", unsafe_allow_html=True)
+            st.html("<p style='font-family:\"Syne\",sans-serif; font-size:0.72rem; font-weight:700; color:#484F58; letter-spacing:0.12em; text-transform:uppercase; margin-bottom:1rem;'>Access Required</p>")
             with st.form("login_form"):
                 e = st.text_input("Email", placeholder="you@company.com")
                 p = st.text_input("Password", type="password", placeholder="••••••••")
-                st.markdown("<br>", unsafe_allow_html=True)
+                st.html("<br>")
                 submitted = st.form_submit_button("AUTHENTICATE →", type="primary", use_container_width=True)
                 if submitted:
                     if e.lower() == "leon@growbigventures.com" and p == "123":
@@ -554,7 +554,7 @@ if not st.session_state.logged_in:
 #  SIDEBAR
 # ─────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("""
+    st.html("""
     <div style="padding: 0 0.2rem 1.2rem;">
         <div style="font-family:'Syne',sans-serif; font-weight:800; font-size:1.1rem;
                     color:#E6EDF3; letter-spacing:-0.02em;">◈ LeadPulse</div>
@@ -562,7 +562,7 @@ with st.sidebar:
                     color:#3D8EF5; letter-spacing:0.12em; text-transform:uppercase;
                     margin-top:0.15rem;">Intelligence Engine</div>
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
     if st.button("⏹  HALT ALL JOBS", type="primary", use_container_width=True):
         supabase.table("zi_jobs").update({"is_paused": True}).neq("status", "done").execute()
@@ -570,8 +570,8 @@ with st.sidebar:
         time.sleep(1)
         st.rerun()
 
-    st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
-    st.markdown("<p style='font-family:\"JetBrains Mono\",monospace; font-size:0.62rem; color:#30363D; letter-spacing:0.12em; text-transform:uppercase; margin-bottom:0.4rem;'>Missions</p>", unsafe_allow_html=True)
+    st.html("<div style='height:0.8rem'></div>")
+    st.html("<p style='font-family:\"JetBrains Mono\",monospace; font-size:0.62rem; color:#30363D; letter-spacing:0.12em; text-transform:uppercase; margin-bottom:0.4rem;'>Missions</p>")
 
     try:
         res = supabase.table("zi_jobs").select("id, mission_name, created_at, status, total_leads, is_paused").order("created_at", desc=True).limit(40).execute()
@@ -600,14 +600,14 @@ with st.sidebar:
         st.session_state["active_mission_id"] = sel[1]
         st.rerun()
 
-    st.markdown("""
+    st.html("""
     <div style="position:fixed; bottom:1.2rem; left:0; width:240px; padding: 0 1rem;">
         <div style="font-family:'JetBrains Mono',monospace; font-size:0.6rem; color:#30363D;
                     border-top:1px solid #1C2333; padding-top:0.7rem;">
             OSINT · SERPER · SUPABASE
         </div>
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
 
 # ─────────────────────────────────────────────
@@ -615,20 +615,20 @@ with st.sidebar:
 # ─────────────────────────────────────────────
 if st.session_state["active_mission_id"] == "NEW":
 
-    st.markdown("""
+    st.html("""
     <div style="margin-bottom:2rem;">
         <h1 style="margin:0; margin-bottom:0.3rem;">New Mission</h1>
         <p style="font-family:'JetBrains Mono',monospace; font-size:0.75rem; color:#484F58; margin:0;">
             Configure a ZoomInfo target and deploy the extraction pipeline.
         </p>
     </div>
-    """, unsafe_allow_html=True)
+    """)
 
     with st.container(border=True):
         section_header("🎯", "Target Configuration", "Paste the full ZoomInfo search URL to begin.")
         url = st.text_input("ZoomInfo Search URL", placeholder="https://app.zoominfo.com/...")
         name = st.text_input("Mission Name", placeholder="e.g. US SaaS CTOs · Q3 2025")
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.html("<br>")
         if st.button("DEPLOY MISSION →", type="primary", use_container_width=True):
             if url:
                 supabase.table("zi_jobs").update({"is_paused": True}).eq("status", "processing").execute()
@@ -673,7 +673,7 @@ else:
                     supabase.table("zi_jobs").update({"status": "done", "is_paused": True}).eq("id", job['id']).execute()
                     st.rerun()
 
-        st.markdown("<div style='height:0.2rem'></div>", unsafe_allow_html=True)
+        st.html("<div style='height:0.2rem'></div>")
 
         # ── Status Badge ──
         if job['status'] == 'done':
@@ -685,7 +685,7 @@ else:
         else:
             status_badge("Queued", "#8B949E", "#8B949E")
 
-        st.markdown("<div style='height:1.2rem'></div>", unsafe_allow_html=True)
+        st.html("<div style='height:1.2rem'></div>")
 
         # ── Metrics ──
         m1, m2, m3, m4 = st.columns(4)
@@ -703,7 +703,7 @@ else:
         m3.metric("Pipeline Phase", "Mining" if job['phase'] == 'zi' else "Enrichment")
         m4.metric("Last Update", job['updated_at'][11:19] + " UTC")
 
-        st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
+        st.html("<div style='height:0.4rem'></div>")
         st.markdown("---")
 
         # ── Terminal ──
@@ -729,7 +729,7 @@ else:
                             supabase.table("zi_jobs").update({"phase": "zi", "is_paused": False, "status": "pending", "updated_at": datetime.now().isoformat()}).eq("id", job['id']).execute()
                             st.rerun()
                 else:
-                    st.markdown("<p style='font-family:\"JetBrains Mono\",monospace; font-size:0.72rem; color:#3FB950;'>✓ Mission archived</p>", unsafe_allow_html=True)
+                    st.html("<p style='font-family:\"JetBrains Mono\",monospace; font-size:0.72rem; color:#3FB950;'>✓ Mission archived</p>")
 
         with c_r:
             with st.container(border=True):
@@ -822,7 +822,7 @@ else:
                                 st.error(f"Pipeline error: {e}")
                                 supabase.table("zi_jobs").update({"status": "error", "is_paused": True}).eq("id", job['id']).execute()
                 else:
-                    st.markdown("<p style='font-family:\"JetBrains Mono\",monospace; font-size:0.72rem; color:#3FB950;'>✓ Mission archived</p>", unsafe_allow_html=True)
+                    st.html("<p style='font-family:\"JetBrains Mono\",monospace; font-size:0.72rem; color:#3FB950;'>✓ Mission archived</p>")
 
         st.markdown("---")
 
@@ -834,7 +834,7 @@ else:
             with col_info:
                 st.info(f"All {job['total_leads']:,} leads will be exported as a CSV file, including enriched email addresses and confidence scores.")
             with col_btn:
-                st.markdown("<div style='height:0.3rem'></div>", unsafe_allow_html=True)
+                st.html("<div style='height:0.3rem'></div>")
                 if st.button(f"EXTRACT {job['total_leads']:,} LEADS", type="primary", use_container_width=True):
                     with st.spinner("Generating export file..."):
                         try:
@@ -863,7 +863,7 @@ else:
                         except Exception as e:
                             st.error(f"Export error: {e}")
 
-        st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
+        st.html("<div style='height:0.6rem'></div>")
 
         # ── Preview ──
         section_header("🔬", "Lead Preview", "Last 25 captured leads.")
@@ -874,13 +874,13 @@ else:
             df_preview.columns = headers[:len(df_preview.columns)]
             st.dataframe(df_preview, use_container_width=True, hide_index=True)
         else:
-            st.markdown("""
+            st.html("""
             <div style="background:#0D1117; border:1px dashed #1C2333; border-radius:8px;
                         padding:2rem; text-align:center;">
                 <p style="font-family:'JetBrains Mono',monospace; font-size:0.75rem;
                            color:#30363D; margin:0;">No lead data yet — start the miner to begin extraction.</p>
             </div>
-            """, unsafe_allow_html=True)
+            """)
 
         # ── Auto-refresh ──
         if not job['is_paused'] and job['status'] != 'done':
